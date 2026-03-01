@@ -16,7 +16,7 @@ Terraform configuration to provision an Azure VM for hosting a Django applicatio
 
 **VM defaults:**
 - **OS**: Ubuntu 22.04 LTS (Gen 2)
-- **Ports open**: 22 (SSH), 80 (HTTP), 443 (HTTPS)
+- **Ports open**: 22 (SSH), 80 (HTTP), 443 (HTTPS), 6000 (Application)
 - **Static public IP** for consistent access
 
 ## Prerequisites
