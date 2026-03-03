@@ -163,7 +163,7 @@ resource "azurerm_linux_virtual_machine" "django" {
 
 # --- Auctopus Application VM (separate deployment) ---
 
-# Network Security Group - Allow SSH (22), HTTPS (443), App ports (8000, 5000)
+# Network Security Group - Allow SSH (22), HTTPS (443), App ports (8000, 5000, 6000)
 resource "azurerm_network_security_group" "auctopus" {
   name                = "${var.auctopus_vm_name}-nsg"
   location            = azurerm_resource_group.django.location
@@ -213,6 +213,18 @@ resource "azurerm_network_security_group" "auctopus" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "5000"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowApp6000"
+    priority                   = 1005
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "6000"
     source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
