@@ -1,23 +1,27 @@
-# Azure VM for Django Application
+# Azure VMs for License Server & Auctopus Application
 
-Terraform configuration to provision an Azure VM for hosting a Django application.
+Terraform configuration to provision Azure VMs: a license server (Django) and an Auctopus application VM, each in its own subnet.
 
 ## What Gets Created
 
 | Resource | Purpose |
 |----------|---------|
 | Resource Group | Container for all resources |
-| Virtual Network | 10.0.0.0/16 address space |
-| Subnet | 10.0.1.0/24 |
-| Network Security Group | Firewall rules |
-| Public IP | Static IP for internet access |
-| Network Interface | VM networking |
-| Linux VM | Ubuntu 22.04 LTS |
+| Virtual Network | 10.0.0.0/16 address space (shared) |
+| Subnet (license-server) | 10.0.1.0/24 |
+| Subnet (auctopus) | 10.0.2.0/24 |
+| NSG, Public IP, NIC, VM | Per-VM resources |
 
-**VM defaults:**
+**License Server VM:**
 - **OS**: Ubuntu 22.04 LTS (Gen 2)
 - **Ports open**: 22 (SSH), 80 (HTTP), 443 (HTTPS), 6000 (Application)
 - **Static public IP** for consistent access
+
+**Auctopus VM:**
+- **OS**: Ubuntu 22.04 LTS (Gen 2)
+- **Size**: Standard_B2as_v2 (2 vCPU, 4 GiB RAM)
+- **Ports open**: 22 (SSH), 443 (HTTPS), 8000, 5000 (Application)
+- **Separate subnet** (10.0.2.0/24)
 
 ## Prerequisites
 
@@ -53,13 +57,35 @@ terraform plan
 terraform apply
 ```
 
-### 4. Connect to your VM
+### 4. Connect to your VMs
+
+After `terraform apply`, use the outputs:
 
 ```bash
-ssh azureuser@<public_ip_address>
+# License server
+terraform output ssh_command
+
+# Auctopus
+terraform output auctopus_ssh_command
 ```
 
-Or use the SSH command from the Terraform output.
+Or manually: `ssh azureuser@<public_ip_address>`
+
+## How Terraform Manages Deployments (Without Breaking Existing Infra)
+
+Terraform uses **state** to track every resource it creates. When you run `terraform apply`:
+
+1. **State mapping** – Each resource has a unique address (e.g. `azurerm_linux_virtual_machine.django`, `azurerm_linux_virtual_machine.auctopus`). Terraform maps these to real Azure resource IDs in its state file.
+
+2. **Incremental changes** – Terraform compares your config to the state and computes a **diff**. It only proposes changes for resources that differ. Unchanged resources are left as-is.
+
+3. **Adding new resources** – When you add the Auctopus VM, Terraform sees new resources that don’t exist in state. It will **only create** those new resources. Existing resources (license-server VM, its subnet, NSG, etc.) are not modified or recreated.
+
+4. **Changing existing resources** – If you change a property of an existing resource (e.g. VM size), Terraform will update or recreate only that resource. Other resources stay untouched.
+
+5. **No cross-impact** – The license-server and auctopus resources are independent. Changing one does not affect the other.
+
+**Summary:** Adding new resources = Terraform creates only the new ones. Existing infrastructure stays intact.
 
 ## Variables Reference
 
@@ -68,10 +94,13 @@ Or use the SSH command from the Terraform output.
 | `ssh_public_key_path` | **Required.** Path to SSH public key | - |
 | `resource_group_name` | Azure resource group name | `django-app-rg` |
 | `location` | Azure region | `eastus` |
-| `vm_name` | VM name | `django-vm` |
+| `vm_name` | License server VM name | `django-vm` |
 | `admin_username` | SSH username | `azureuser` |
-| `vm_size` | VM size | `Standard_B1ms` |
-| `os_disk_size_gb` | OS disk size (GB) | `30` |
+| `vm_size` | License server VM size | `Standard_B1ms` |
+| `os_disk_size_gb` | License server OS disk (GB) | `30` |
+| `auctopus_vm_name` | Auctopus VM name | `auctopus-vm` |
+| `auctopus_vm_size` | Auctopus VM size | `Standard_B2as_v2` |
+| `auctopus_os_disk_size_gb` | Auctopus OS disk (GB) | `30` |
 
 ## VM Size & Region Notes
 
@@ -98,16 +127,13 @@ Or use the SSH command from the Terraform output.
 
 **Image compatibility:** `Standard_A1_v2` and other Gen 1-only sizes require the Gen 1 Ubuntu image (`22_04-lts`). Most B-series and D-series support Gen 2 (`22_04-lts-gen2`).
 
-## Deployment Stages (8 total)
+## Deployment Stages
 
-1. Resource Group  
-2. Virtual Network  
-3. Subnet  
-4. Network Security Group  
-5. Public IP  
-6. Network Interface  
-7. NSG–NIC Association  
-8. **Virtual Machine** ← Failures usually occur here (VM size/region)
+**Shared:** Resource Group → Virtual Network → Subnets (license-server, auctopus)
+
+**Per VM:** NSG → Public IP → Network Interface → NSG–NIC Association → Virtual Machine
+
+Failures usually occur at the VM stage (VM size/region availability).
 
 ## Next Steps: Deploying Django
 
@@ -118,6 +144,36 @@ Once connected via SSH:
 3. Install and configure Gunicorn/uWSGI
 4. Set up SSL certificate (e.g. Let's Encrypt)
 5. Deploy your Django application
+
+## Shutting Down VMs (Save Costs)
+
+To deallocate all VMs (stops them and releases compute—you stop paying for VM hours):
+
+```bash
+./shutdown-vms.sh
+```
+
+Or pass the resource group explicitly:
+
+```bash
+./shutdown-vms.sh license-server-prod-app-rg
+```
+
+## Starting VMs
+
+To start all VMs again after shutting them down:
+
+```bash
+./start-vms.sh
+```
+
+Or pass the resource group explicitly:
+
+```bash
+./start-vms.sh license-server-prod-app-rg
+```
+
+Both scripts require `az login` first.
 
 ## Cleanup
 

@@ -47,3 +47,23 @@ variable "tags" {
     application = "django"
   }
 }
+
+# --- Auctopus Application VM ---
+
+variable "auctopus_vm_name" {
+  description = "Name of the Auctopus application virtual machine"
+  type        = string
+  default     = "auctopus-vm"
+}
+
+variable "auctopus_vm_size" {
+  description = "VM size for Auctopus - Standard_B2as_v2: 2 vCPU, 4 GiB RAM"
+  type        = string
+  default     = "Standard_B2as_v2"
+}
+
+variable "auctopus_os_disk_size_gb" {
+  description = "OS disk size in GB for Auctopus VM"
+  type        = number
+  default     = 30
+}

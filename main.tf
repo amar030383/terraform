@@ -26,12 +26,20 @@ resource "azurerm_virtual_network" "django" {
   resource_group_name = azurerm_resource_group.django.name
 }
 
-# Subnet
+# Subnet - Django/License Server
 resource "azurerm_subnet" "django" {
   name                 = "${var.vm_name}-subnet"
   resource_group_name  = azurerm_resource_group.django.name
   virtual_network_name = azurerm_virtual_network.django.name
   address_prefixes     = ["10.0.1.0/24"]
+}
+
+# Subnet - Auctopus Application (separate subnet)
+resource "azurerm_subnet" "auctopus" {
+  name                 = "${var.auctopus_vm_name}-subnet"
+  resource_group_name  = azurerm_resource_group.django.name
+  virtual_network_name = azurerm_virtual_network.django.name
+  address_prefixes     = ["10.0.2.0/24"]
 }
 
 # Network Security Group - Allow SSH (22) and HTTPS (443)
@@ -125,7 +133,7 @@ resource "azurerm_linux_virtual_machine" "django" {
   resource_group_name = azurerm_resource_group.django.name
   location            = azurerm_resource_group.django.location
   size                = var.vm_size
-  admin_username      = var.admin_username
+  admin_username = var.admin_username
 
   admin_ssh_key {
     username   = var.admin_username
@@ -151,4 +159,124 @@ resource "azurerm_linux_virtual_machine" "django" {
   }
 
   tags = var.tags
+}
+
+# --- Auctopus Application VM (separate deployment) ---
+
+# Network Security Group - Allow SSH (22), HTTPS (443), App ports (8000, 5000)
+resource "azurerm_network_security_group" "auctopus" {
+  name                = "${var.auctopus_vm_name}-nsg"
+  location            = azurerm_resource_group.django.location
+  resource_group_name = azurerm_resource_group.django.name
+
+  security_rule {
+    name                       = "AllowSSH"
+    priority                   = 1001
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowHTTPS"
+    priority                   = 1002
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowApp8000"
+    priority                   = 1003
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8000"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowApp5000"
+    priority                   = 1004
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "5000"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+# Public IP - Auctopus
+resource "azurerm_public_ip" "auctopus" {
+  name                = "${var.auctopus_vm_name}-pip"
+  location            = azurerm_resource_group.django.location
+  resource_group_name = azurerm_resource_group.django.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# Network Interface - Auctopus
+resource "azurerm_network_interface" "auctopus" {
+  name                = "${var.auctopus_vm_name}-nic"
+  location            = azurerm_resource_group.django.location
+  resource_group_name = azurerm_resource_group.django.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.auctopus.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.auctopus.id
+  }
+}
+
+# Associate NSG with NIC - Auctopus
+resource "azurerm_network_interface_security_group_association" "auctopus" {
+  network_interface_id      = azurerm_network_interface.auctopus.id
+  network_security_group_id = azurerm_network_security_group.auctopus.id
+}
+
+# Virtual Machine - Auctopus (Standard_B2as_v2: 2 vCPU, 4 GiB RAM)
+resource "azurerm_linux_virtual_machine" "auctopus" {
+  name                = var.auctopus_vm_name
+  resource_group_name = azurerm_resource_group.django.name
+  location            = azurerm_resource_group.django.location
+  size                = var.auctopus_vm_size
+  admin_username = var.admin_username
+
+  admin_ssh_key {
+    username   = var.admin_username
+    public_key = file(var.ssh_public_key_path)
+  }
+
+  network_interface_ids = [
+    azurerm_network_interface.auctopus.id,
+  ]
+
+  os_disk {
+    name                 = "${var.auctopus_vm_name}-osdisk"
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+    disk_size_gb         = var.auctopus_os_disk_size_gb
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  tags = merge(var.tags, { application = "auctopus" })
 }
